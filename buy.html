@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1"/>
+<title>StockOS Pro — Activate</title>
+<script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+<style>
+  :root{--bg:#0b0b10;--card:#13131a;--line:#1e1e2e;--orange:#f97316;--green:#4ade80;--red:#f87171;--txt:#e8e6e1;}
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--bg);color:var(--txt);font-family:'Courier New',monospace;
+    min-height:100vh;display:flex;align-items:center;justify-content:center;padding:16px;}
+  .card{background:var(--card);border:1.5px solid var(--orange);border-radius:14px;padding:24px 20px;
+    width:100%;max-width:400px;}
+  h1{font-size:18px;color:var(--orange);margin:0 0 4px;letter-spacing:1px;}
+  .sub{font-size:12px;color:#888;margin-bottom:20px;}
+  label{font-size:11px;color:#888;font-weight:700;letter-spacing:.6px;display:block;margin-bottom:5px;margin-top:14px;}
+  input,select{width:100%;background:#0f0f14;border:1.5px solid var(--line);border-radius:9px;color:var(--txt);
+    padding:11px 12px;font-size:14px;font-family:inherit;outline:none;}
+  input:focus,select:focus{border-color:var(--orange);}
+  .plans{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:6px;}
+  .plan{padding:12px 8px;border-radius:10px;border:2px solid var(--line);background:#0f0f14;text-align:center;cursor:pointer;}
+  .plan.sel{border-color:var(--orange);background:#1a0900;}
+  .plan .price{font-size:17px;font-weight:800;color:var(--orange);}
+  .plan .per{font-size:10px;color:#666;}
+  button.pay{width:100%;margin-top:20px;background:var(--orange);border:none;color:#000;font-weight:800;
+    font-size:14px;padding:14px;border-radius:10px;cursor:pointer;font-family:inherit;}
+  button.pay:disabled{opacity:.5;cursor:not-allowed;}
+  .err{color:var(--red);font-size:12px;margin-top:10px;min-height:16px;}
+  .result{display:none;margin-top:18px;background:#0a1a0a;border:1.5px solid #4ade8066;border-radius:10px;padding:16px;text-align:center;}
+  .result .key{font-size:18px;font-weight:900;color:var(--green);letter-spacing:2px;word-break:break-all;margin:10px 0;}
+  .result .copy{background:#0f2a0f;border:1.5px solid var(--green);color:var(--green);padding:8px 14px;
+    border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;}
+  .hint{font-size:10px;color:#555;margin-top:6px;line-height:1.5;}
+</style>
+</head>
+<body>
+  <div class="card" id="app">
+    <h1>🔒 StockOS Pro</h1>
+    <div class="sub">Activate on this device — instant, no waiting.</div>
+
+    <label>Your Device ID <span style="color:#555;font-weight:400;">(shown in the app under Premium)</span></label>
+    <input id="deviceId" placeholder="DEV-XXXXXXXXXXXX" autocomplete="off" autocapitalize="characters"/>
+
+    <label>Email <span style="color:#555;font-weight:400;">(for a backup copy of your key)</span></label>
+    <input id="email" type="email" placeholder="you@example.com" autocomplete="email"/>
+
+    <label>Plan</label>
+    <div class="plans">
+      <div class="plan sel" data-plan="monthly" onclick="selectPlan('monthly')">
+        <div class="price">₹199</div><div class="per">per month</div>
+      </div>
+      <div class="plan" data-plan="yearly" onclick="selectPlan('yearly')">
+        <div class="price">₹1999</div><div class="per">per year</div>
+      </div>
+    </div>
+
+    <button class="pay" id="payBtn" onclick="startPayment()">Pay & Activate</button>
+    <div class="err" id="err"></div>
+
+    <div class="result" id="result">
+      <div style="font-size:12px;color:#888;">Your license key</div>
+      <div class="key" id="keyOut">—</div>
+      <button class="copy" onclick="copyKey()">📋 Copy Key</button>
+      <div class="hint">Open the app → Premium → paste this in "already paid? enter password" → Activate.</div>
+    </div>
+  </div>
+
+<script>
+// ── SET THIS to your deployed Worker URL (see worker.js header comment) ──
+const API_BASE = 'https://your-worker-name.your-subdomain.workers.dev';
+
+let plan = 'monthly';
+function selectPlan(p){
+  plan = p;
+  document.querySelectorAll('.plan').forEach(el=>el.classList.toggle('sel', el.dataset.plan===p));
+}
+
+function setErr(msg){ document.getElementById('err').textContent = msg||''; }
+
+async function startPayment(){
+  setErr('');
+  const deviceId = document.getElementById('deviceId').value.trim();
+  const email = document.getElementById('email').value.trim();
+  if(!deviceId){ setErr('Enter your Device ID from the app first.'); return; }
+
+  const btn = document.getElementById('payBtn');
+  btn.disabled = true; btn.textContent = 'Starting payment…';
+
+  try{
+    const orderRes = await fetch(API_BASE+'/create-order', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ deviceId, plan })
+    });
+    const order = await orderRes.json();
+    if(!orderRes.ok) throw new Error(order.error||'Could not start payment');
+
+    const rzp = new Razorpay({
+      key: order.keyId,
+      order_id: order.orderId,
+      amount: order.amount,
+      currency: order.currency,
+      name: 'StockOS Pro',
+      description: (plan==='yearly'?'Yearly':'Monthly')+' license — '+deviceId,
+      prefill: { email },
+      theme: { color: '#f97316' },
+      handler: async function(response){
+        btn.textContent = 'Verifying payment…';
+        try{
+          const issueRes = await fetch(API_BASE+'/verify-and-issue', {
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({
+              orderId: response.razorpay_order_id,
+              paymentId: response.razorpay_payment_id,
+              signature: response.razorpay_signature,
+              deviceId, plan, email
+            })
+          });
+          const issued = await issueRes.json();
+          if(!issueRes.ok) throw new Error(issued.error||'Verification failed');
+          document.getElementById('keyOut').textContent = issued.key;
+          document.getElementById('result').style.display = 'block';
+          document.getElementById('app').querySelectorAll('label,input,.plans,.pay').forEach(el=>el.style.display='none');
+        }catch(e){
+          setErr('Payment succeeded but key issuing failed: '+e.message+'. Contact support with payment ID: '+response.razorpay_payment_id);
+        }
+        btn.disabled=false; btn.textContent='Pay & Activate';
+      },
+      modal: { ondismiss: function(){ btn.disabled=false; btn.textContent='Pay & Activate'; } }
+    });
+    rzp.on('payment.failed', function(resp){
+      setErr('Payment failed: '+(resp.error && resp.error.description || 'unknown error'));
+      btn.disabled=false; btn.textContent='Pay & Activate';
+    });
+    rzp.open();
+  }catch(e){
+    setErr(e.message);
+    btn.disabled=false; btn.textContent='Pay & Activate';
+  }
+}
+
+function copyKey(){
+  const k = document.getElementById('keyOut').textContent;
+  navigator.clipboard.writeText(k).then(()=>{
+    const b = document.querySelector('.copy'); const old=b.textContent;
+    b.textContent='✅ Copied'; setTimeout(()=>b.textContent=old, 1500);
+  });
+}
+</script>
+</body>
+</html>
