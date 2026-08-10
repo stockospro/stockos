@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1"/>
+<title>StockOS — Admin</title>
+<style>
+  :root{--bg:#0b0b10;--card:#13131a;--line:#1e1e2e;--orange:#f97316;--green:#4ade80;--red:#f87171;--amber:#fbbf24;--txt:#e8e6e1;}
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--bg);color:var(--txt);font-family:'Courier New',monospace;padding:16px;}
+  .wrap{max-width:900px;margin:0 auto;}
+  h1{font-size:18px;color:var(--orange);margin:0 0 16px;}
+  .gate{background:var(--card);border:1.5px solid var(--orange);border-radius:14px;padding:24px;max-width:340px;margin:60px auto;text-align:center;}
+  .gate input{width:100%;background:#0f0f14;border:1.5px solid var(--line);border-radius:9px;color:var(--txt);
+    padding:12px;font-size:16px;font-family:inherit;outline:none;text-align:center;letter-spacing:2px;margin-bottom:12px;}
+  .gate button{width:100%;background:var(--orange);border:none;color:#000;font-weight:800;font-size:14px;
+    padding:12px;border-radius:9px;cursor:pointer;font-family:inherit;}
+  .err{color:var(--red);font-size:12px;margin-top:10px;min-height:16px;}
+  .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px;margin-bottom:16px;}
+  .stat{background:var(--card);border:1.5px solid var(--line);border-radius:10px;padding:12px;text-align:center;}
+  .stat .n{font-size:20px;font-weight:800;color:var(--orange);}
+  .stat .l{font-size:10px;color:#888;margin-top:2px;}
+  input#search{width:100%;background:var(--card);border:1.5px solid var(--line);border-radius:9px;color:var(--txt);
+    padding:10px 12px;font-size:13px;font-family:inherit;outline:none;margin-bottom:12px;}
+  table{width:100%;border-collapse:collapse;font-size:12px;}
+  th{text-align:left;color:#888;font-size:10px;letter-spacing:.6px;padding:8px 10px;border-bottom:1.5px solid var(--line);}
+  td{padding:9px 10px;border-bottom:1px solid #16161e;}
+  tr:hover td{background:#0f0f16;}
+  .badge{padding:2px 8px;border-radius:20px;font-size:10px;font-weight:700;}
+  .b-auto{background:#0a1a2a;color:#60a5fa;}
+  .b-manual{background:#1a1200;color:var(--amber);}
+  .b-active{background:#052e16;color:var(--green);}
+  .b-soon{background:#2a1a00;color:var(--amber);}
+  .b-expired{background:#2a0a0a;color:var(--red);}
+  .key{color:#666;letter-spacing:1px;font-size:11px;}
+  .copy{background:#1e1e2e;border:none;color:#aaa;border-radius:6px;padding:3px 8px;font-size:10px;cursor:pointer;font-family:inherit;}
+  .empty{text-align:center;color:#555;padding:40px 20px;font-size:13px;}
+  .refresh{background:var(--card);border:1.5px solid var(--line);color:#aaa;border-radius:8px;padding:8px 14px;
+    font-size:12px;cursor:pointer;font-family:inherit;float:right;margin-bottom:12px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="gate" id="gate">
+    <div style="font-size:26px;margin-bottom:8px;">🔐</div>
+    <h1 style="text-align:center;">Admin Dashboard</h1>
+    <input id="pinInp" type="password" placeholder="Admin PIN" onkeydown="if(event.key==='Enter')loadDashboard()"/>
+    <button onclick="loadDashboard()">Enter</button>
+    <div class="err" id="gateErr"></div>
+  </div>
+
+  <div id="dash" style="display:none;">
+    <h1>📋 StockOS — Customers</h1>
+    <button class="refresh" onclick="loadDashboard()">↻ Refresh</button>
+    <div class="stats" id="stats"></div>
+    <input id="search" placeholder="🔍 Search by Device ID, phone/email..." oninput="renderTable()"/>
+    <table>
+      <thead><tr><th>Device ID</th><th>Contact</th><th>Plan</th><th>Expiry</th><th>Status</th><th>Source</th><th>Key</th></tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+    <div class="empty" id="emptyMsg" style="display:none;">No customers yet.</div>
+  </div>
+</div>
+
+<script>
+// ── SET THIS to your deployed Worker URL (same one used in buy.html / index.html) ──
+const API_BASE = 'https://your-worker-name.your-subdomain.workers.dev';
+
+let allCustomers = [];
+let savedPin = '';
+
+async function loadDashboard(){
+  const pin = document.getElementById('pinInp').value.trim() || savedPin;
+  if(!pin){ document.getElementById('gateErr').textContent='Enter your PIN.'; return; }
+  try{
+    const res = await fetch(API_BASE+'/admin-list', {
+      method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ pin })
+    });
+    const data = await res.json();
+    if(!res.ok) throw new Error(data.error||'Wrong PIN');
+    savedPin = pin;
+    allCustomers = data.customers || [];
+    document.getElementById('gate').style.display='none';
+    document.getElementById('dash').style.display='block';
+    renderStats();
+    renderTable();
+  }catch(e){
+    document.getElementById('gateErr').textContent = '❌ '+e.message;
+  }
+}
+
+function daysLeft(expiry){
+  return Math.ceil((new Date(expiry) - new Date())/86400000);
+}
+
+function renderStats(){
+  const total = allCustomers.length;
+  const active = allCustomers.filter(c=>daysLeft(c.expiry)>3).length;
+  const soon = allCustomers.filter(c=>{const d=daysLeft(c.expiry);return d<=3&&d>0;}).length;
+  const expired = allCustomers.filter(c=>daysLeft(c.expiry)<=0).length;
+  document.getElementById('stats').innerHTML = `
+    <div class="stat"><div class="n">${total}</div><div class="l">Total customers</div></div>
+    <div class="stat"><div class="n" style="color:var(--green);">${active}</div><div class="l">Active</div></div>
+    <div class="stat"><div class="n" style="color:var(--amber);">${soon}</div><div class="l">Expiring ≤3 days</div></div>
+    <div class="stat"><div class="n" style="color:var(--red);">${expired}</div><div class="l">Expired</div></div>
+  `;
+}
+
+function esc(s){ return String(s||'').replace(/[&<>"']/g, m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
+
+function renderTable(){
+  const q = (document.getElementById('search').value||'').toLowerCase();
+  const filtered = allCustomers.filter(c =>
+    !q || (c.deviceId||'').toLowerCase().includes(q) || (c.phone||'').toLowerCase().includes(q) || (c.email||'').toLowerCase().includes(q)
+  );
+  document.getElementById('emptyMsg').style.display = filtered.length ? 'none' : 'block';
+  document.getElementById('rows').innerHTML = filtered.map(c=>{
+    const d = daysLeft(c.expiry);
+    const statusBadge = d<=0 ? '<span class="badge b-expired">Expired</span>'
+      : d<=3 ? `<span class="badge b-soon">${d}d left</span>`
+      : `<span class="badge b-active">${d}d left</span>`;
+    const sourceBadge = c.source==='auto' ? '<span class="badge b-auto">Auto</span>' : '<span class="badge b-manual">Manual</span>';
+    return `<tr>
+      <td>${esc(c.deviceId)}</td>
+      <td>${esc(c.phone)||'—'}${c.email?`<br/><span style="color:#666;font-size:10px;">${esc(c.email)}</span>`:''}</td>
+      <td>${esc((c.plan||'').toUpperCase())}</td>
+      <td>${esc(c.expiry)}</td>
+      <td>${statusBadge}</td>
+      <td>${sourceBadge}</td>
+      <td><span class="key">${esc(c.key)}</span> <button class="copy" onclick="navigator.clipboard.writeText('${esc(c.key)}')">📋</button></td>
+    </tr>`;
+  }).join('');
+}
+</script>
+</body>
+</html>
